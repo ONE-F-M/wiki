@@ -215,6 +215,11 @@ class WikiPage(WebsiteGenerator):
 
 		return toc_html
 
+
+	
+
+
+
 	def get_context(self, context):
 		self.verify_permission("read")
 		self.set_breadcrumbs(context)
@@ -225,6 +230,7 @@ class WikiPage(WebsiteGenerator):
 		context.dark_mode_logo = wiki_settings.dark_mode_logo
 		context.script = wiki_settings.javascript
 		context.wiki_search_scope = self.get_space_route()
+		context.is_wiki_manager = has_wiki_manager_role()
 		context.metatags = {
 			"title": self.title,
 			"description": self.meta_description,
@@ -236,6 +242,11 @@ class WikiPage(WebsiteGenerator):
 		context.edit_wiki_page = frappe.form_dict.get("editWiki")
 		context.new_wiki_page = frappe.form_dict.get("newWiki")
 		context.last_revision = self.get_last_revision()
+		patch_data = has_draft_patch(context.docname)
+		if patch_data:
+			context.existing_page_patch_title = patch_data.get('title')
+			context.existing_page_patch_owner = patch_data.get('approved_by')
+			context.existing_page_patch_url = patch_data.get('url')
 		context.number_of_revisions = frappe.db.count(
 			"Wiki Page Revision Item", {"wiki_page": self.name}
 		)
@@ -255,13 +266,23 @@ class WikiPage(WebsiteGenerator):
 			context.previous_revision = revisions[1]
 		else:
 			context.previous_revision = {"content": "<h3>No Revisions</h3>", "name": ""}
-
+		context.lang = 'en' if self.language in ['English',None,''] else 'عربي' #defaults to english language
+		wiki_lang = f'wiki_language_{frappe.session.user}'
+		frappe.cache().set_value(wiki_lang,'en' if context.lang=='en' else 'ar')
+		context.layout_direction = "rtl" if context.lang == 'ar'  else "ltr"
 		context.show_sidebar = True
 		context.hide_login = True
 		context.name = self.name
 		if (frappe.form_dict.editWiki or frappe.form_dict.newWiki) and frappe.form_dict.wikiPagePatch:
-			context.patch_new_code, context.patch_new_title = frappe.db.get_value(
-				"Wiki Page Patch", frappe.form_dict.wikiPagePatch, ["new_code", "new_title"]
+			context.can_approve = is_approver(frappe.form_dict.wikiPagePatch)
+			(
+				context.patch_new_code,
+				context.patch_new_title,
+				context.new_sidebar_group,
+			) = frappe.db.get_value(
+				"Wiki Page Patch",
+				frappe.form_dict.wikiPagePatch,
+				["new_code", "new_title", "new_sidebar_group"],
 			)
 		context = context.update(
 			{
@@ -280,7 +301,6 @@ class WikiPage(WebsiteGenerator):
 				],
 			}
 		)
-
 	def get_items(self, sidebar_items):
 		topmost = frappe.get_value("Wiki Group Item", {"wiki_page": self.name}, ["parent"])
 
@@ -380,6 +400,37 @@ def get_open_contributions():
 	)
 	return f'<span class="count">{count}</span>'
 
+@frappe.whitelist()
+def fetch_language(wiki):
+	try:
+		if wiki:
+			patch_data = has_draft_patch(wiki)
+			lang = frappe.get_value("Wiki Page",wiki,'language')
+			lang = 'English' if lang in ['',None,'English'] else "Arabic"
+			return {
+				'language':lang,
+				'url':patch_data.get('url'),
+				'owner':patch_data.get('approved_by'),
+				'title':patch_data.get('title'),
+				
+			}
+	except:
+		frappe.log_error(title="Fetching Wiki Page",message=frappe.get_traceback())
+
+
+@frappe.whitelist()
+def change_language(lang,user=None):
+	# change the language of a user
+	try:
+		lang_ = 'en' if lang == 'English' else 'ar'
+		if not user:
+			user = frappe.session.user
+		wiki_lang = f'wiki_language_{user}'
+		frappe.cache().set_value(wiki_lang,lang_)
+		return True
+	except:
+		frappe.log_error(frappe.get_traceback(),"Error while changing language")
+		return False
 
 def get_open_drafts():
 	count = len(
@@ -389,6 +440,9 @@ def get_open_drafts():
 		)
 	)
 	return f'<span class="count">{count}</span>'
+
+def has_wiki_manager_role():
+	return 1 if "Wiki Manager" in frappe.get_roles(frappe.session.user) else 0
 
 
 @frappe.whitelist()
@@ -432,6 +486,33 @@ def extract_images_from_html(content):
 	if content and isinstance(content, str):
 		content = re.sub(r'<img[^>]*src\s*=\s*["\'](?=data:)(.*?)["\']', _save_file, content)
 	return content, file_ids["name"]
+
+def has_draft_patch(wiki):
+		#Checks if the wiki document has a draft wiki page patch
+	route = frappe.db.get_value("Wiki Page", wiki, "route")
+	wiki_page_patch = frappe.get_all("Wiki Page Patch",{'wiki_page':wiki,'docstatus':0,'new':0,'status':'Draft'},['new_title','name','approved_by'])
+	if wiki_page_patch:
+		edit_link = f"/{route}?editWiki=1&wikiPagePatch={wiki_page_patch[0].name}"
+		return {
+			'url':edit_link,
+			'approved_by':wiki_page_patch[0].approved_by,
+			'title':wiki_page_patch[0].new_title,
+			
+		}
+	else:
+		return {
+			'url':'',
+			'approved_by':'',
+			'title':'',
+		}
+
+
+def is_approver(patch_name):
+	#Returns a boolean if the current user is allowed to approve the wiki_page_patch.
+	approver = frappe.get_value("Wiki Page Patch",patch_name,'approved_by')
+	wiki_manager = "Wiki Manager" in frappe.get_roles(frappe.session.user)
+	return True if approver == frappe.session.user or wiki_manager else  False
+
 
 
 @frappe.whitelist()
