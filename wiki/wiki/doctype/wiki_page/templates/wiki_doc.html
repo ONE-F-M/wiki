@@ -102,7 +102,7 @@ id="page-{{ name or route | e }}" data-path="{{ pathname | e }}"
 				//$('[data-tiptap-button="draftWikiPage"]').hide()
 				//$('[data-tiptap-button="saveWikiPage"]').hide()
 				
-				window.wiki_language == "English" ? $('.btn.btn-primary.save-wiki-page-btn.btn-sm').html("Save Draft") : $('.btn.btn-primary.save-wiki-page-btn.btn-sm').html("حفظ المسودة")
+				window.wiki_language == "English" ? $('.btn.btn-primary.save-wiki-page-btn.btn-sm').html("Save Draft Wiki") : $('.btn.btn-primary.save-wiki-page-btn.btn-sm').html("حفظ المسودة")
 				
 				$('.btn.btn-primary.save-wiki-page-btn.btn-sm').off('click', 'saveWikiPage');
 				$('.btn.btn-primary.save-wiki-page-btn.btn-sm').attr('data-tiptap-button', 'draftWikiPage')
@@ -115,6 +115,7 @@ id="page-{{ name or route | e }}" data-path="{{ pathname | e }}"
 				$('.btn.btn-primary.save-wiki-page-btn.btn-sm').off('click', 'saveWikiPage');
 				$('[data-tiptap-button="saveWikiPage"]').hide()
 				$('.btn.btn-primary.save-wiki-page-btn.btn-sm').click(()=>{
+					
 					saveWikiPage(draft=false)
 				})
 				
@@ -178,7 +179,7 @@ id="page-{{ name or route | e }}" data-path="{{ pathname | e }}"
 
 		}
 		const saveWikiPage = (draft = false,rejected = false) => {
-			
+			console.log("CLICKING SAVE WIKI")
 			const urlParams = new URLSearchParams(window.location.search);
 			const isEmptyEditor = !!urlParams.get("newWiki");
 		  

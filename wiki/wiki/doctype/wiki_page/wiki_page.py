@@ -278,11 +278,11 @@ class WikiPage(WebsiteGenerator):
 			(
 				context.patch_new_code,
 				context.patch_new_title,
-				context.new_sidebar_group,
+				
 			) = frappe.db.get_value(
 				"Wiki Page Patch",
 				frappe.form_dict.wikiPagePatch,
-				["new_code", "new_title", "new_sidebar_group"],
+				["new_code", "new_title"],
 			)
 		context = context.update(
 			{
@@ -327,26 +327,28 @@ class WikiPage(WebsiteGenerator):
 
 		for sidebar_item in wiki_sidebar:
 			wiki_page = frappe.get_doc("Wiki Page", sidebar_item.wiki_page)
-			if sidebar_item.parent_label not in sidebar:
-				sidebar[sidebar_item.parent_label] = [
-					{
-						"name": wiki_page.name,
-						"type": "Wiki Page",
-						"title": wiki_page.title,
-						"route": wiki_page.route,
-						"group_name": sidebar_item.parent_label,
-					}
-				]
-			else:
-				sidebar[sidebar_item.parent_label] += [
-					{
-						"name": wiki_page.name,
-						"type": "Wiki Page",
-						"title": wiki_page.title,
-						"route": wiki_page.route,
-						"group_name": sidebar_item.parent_label,
-					}
-				]
+			wiki_language = self.language or 'English'	
+			if wiki_page.language == wiki_language:
+				if sidebar_item.parent_label not in sidebar:
+					sidebar[sidebar_item.parent_label] = [
+						{
+							"name": wiki_page.name,
+							"type": "Wiki Page",
+							"title": wiki_page.title,
+							"route": wiki_page.route,
+							"group_name": sidebar_item.parent_label,
+						}
+					]
+				else:
+					sidebar[sidebar_item.parent_label] += [
+						{
+							"name": wiki_page.name,
+							"type": "Wiki Page",
+							"title": wiki_page.title,
+							"route": wiki_page.route,
+							"group_name": sidebar_item.parent_label,
+						}
+					]
 
 		return self.get_items(sidebar)
 
@@ -399,6 +401,14 @@ def get_open_contributions():
 		)
 	)
 	return f'<span class="count">{count}</span>'
+
+
+@frappe.whitelist()
+def fetch_cached_language():
+	#fetch the cached wiki language for the user, defauklt to english if none is set
+	value =  frappe.cache().get_value(f'wiki_language_{frappe.session.user}')
+	return 'en' if not value else value
+
 
 @frappe.whitelist()
 def fetch_language(wiki):
@@ -527,6 +537,8 @@ def update(
 	new_sidebar="",
 	new_sidebar_items="",
 	draft=False,
+	rejected = False,
+	new_sidebar_group="",
 ):
 
 	context = {"route": name}
@@ -544,7 +556,9 @@ def update(
 		patch.status = status
 		patch.message = message
 		patch.new = new
+		patch.new_sidebar = new_sidebar
 		patch.new_sidebar_items = new_sidebar_items
+		patch.new_sidebar_group = new_sidebar_group
 		patch.save()
 
 	else:
@@ -559,6 +573,7 @@ def update(
 			"new": new,
 			"new_title": title,
 			"new_sidebar_items": new_sidebar_items,
+			"new_sidebar_group": new_sidebar_group,
 		}
 
 		patch.update(patch_dict)
@@ -572,7 +587,7 @@ def update(
 
 	if frappe.has_permission(doctype="Wiki Page Patch", ptype="submit", throw=False) and not draft:
 		patch.approved_by = frappe.session.user
-		patch.status = "Approved"
+		patch.status = "Approved" if rejected in ['false',False] else "Rejected"
 		patch.submit()
 		out.approved = True
 
@@ -584,9 +599,13 @@ def update(
 	elif hasattr(patch, "new_wiki_page"):
 		out.route = patch.new_wiki_page.route
 	else:
-		out.route = patch.wiki_page_doc.route
+		if patch.get('wiki_page_doc'):
+			out.route = patch.wiki_page_doc.route
+		else:
+			out.route = frappe.get_value("Wiki Page",patch.wiki_page,'route')
 
 	return out
+
 
 
 def update_file_links(file_ids, patch_name):
@@ -651,3 +670,30 @@ def delete_wiki_page(wiki_page_route):
 @frappe.whitelist(allow_guest=True)
 def has_edit_permission():
 	return frappe.has_permission(doctype="Wiki Page", ptype="write", throw=False)
+
+
+@frappe.whitelist()
+def is_permitted(user):
+	"""
+		Checks the Wiki Page Access table in ONEFM General settings page to confirm if the user has edit and creation access on the webform
+
+		Args:
+			user (str): Email address of user.
+			Returns Boolean
+ 
+	"""
+	accepted_roles = frappe.get_doc("ONEFM General Setting",None).wiki_page_access
+	if accepted_roles:
+		roles_list = [i.role for i in accepted_roles]
+		roles_intersection = [value for value in roles_list if value in frappe.get_roles(user)]
+		if roles_intersection:
+			return 1
+		elif "Wiki Manager" in frappe.get_roles(user):
+			return 1
+		else:
+			return 0
+	else:
+		return 0
+
+
+
