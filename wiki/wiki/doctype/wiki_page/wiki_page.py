@@ -6,7 +6,7 @@ import re
 from urllib.parse import urlencode
 
 import frappe
-from bleach_allowlist import bleach_allowlist
+# from bleach_allowlist import bleach_allowlist
 from frappe import _
 from frappe.core.doctype.file.file import get_random_filename
 from frappe.utils.data import sbool
@@ -120,7 +120,7 @@ class WikiPage(WebsiteGenerator):
 			html,
 			tags=tags,
 			attributes={"*": attributes_filter, "svg": svg_attributes},
-			styles=bleach_allowlist.all_styles,
+			# styles=bleach_allowlist.all_styles,
 			strip_comments=False,
 			protocols=["cid", "http", "https", "mailto"],
 		)
