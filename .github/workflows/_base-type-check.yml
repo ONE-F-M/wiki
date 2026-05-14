@@ -1,0 +1,49 @@
+name: Type Check
+
+on:
+  pull_request:
+    branches: [staging, test-production, version-15]
+    paths:
+      - "wiki/**/*.py"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: typecheck-wiki-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Type Check with basedmypy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install basedmypy~=2.0.0
+          pip install frappe-bench
+
+      - name: Setup bench
+        run: |
+          bench init --skip-assets --python $(which python) --frappe-branch version-15 ~/frappe-bench
+          cd ~/frappe-bench
+
+      - name: Install frappe and app
+        run: |
+          cd ~/frappe-bench
+          bench get-app frappe https://github.com/frappe/frappe --branch version-15
+          bench get-app wiki $GITHUB_WORKSPACE
+
+      - name: Run basedmypy
+        run: |
+          cd ~/frappe-bench/apps/wiki
+          basedmypy wiki/ --ignore-missing-imports
