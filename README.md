@@ -50,6 +50,35 @@ Note: Wiki's master branch does not support v13 Frappe / ERPNext
 ### 2. Edit Page
 <img width="1552" alt="wiki-edit" src="https://github.com/frappe/wiki/assets/63963181/339d1422-6c99-450d-9e97-7348651abe63.png">
 
+## Testing
+
+Run tests using Frappe's test runner:
+
+```bash
+# Run all tests
+bench --site sitename run-tests --app wiki
+
+# Run specific test file
+bench --site sitename run-tests --doctype Wiki Page
+
+# Run with coverage
+bench --site sitename run-tests --app wiki --coverage
+```
+
+## CI/CD
+
+GitHub Actions workflows:
+- `test-on-pr.yml` - Runs tests on every PR with coverage reporting
+- `linters.yml` - Code quality checks (Semgrep, pip-audit, pre-commit)
+- Coverage threshold: 30%
+- Codecov integration for coverage reports
+
+## Support
+
+- GitHub Issues: Report bugs and feature requests
+- Documentation: See AGENTS.md for developer guide
+- Frappe Forum: General Frappe/ERPNext questions
+
 #### License
 
 MIT
