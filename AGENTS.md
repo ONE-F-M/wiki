@@ -1,131 +1,277 @@
-# Wiki Agent Context
+# AGENTS.md - wiki
 
-This document provides context for AI agents working with the wiki codebase.
+This file is the working context for agents making changes in the `wiki` app repository.
 
-## Project Overview
+## Purpose
 
-**wiki** is a documentation and knowledge management app for Frappe Framework, providing wiki-style documentation pages with markdown support, versioning, and access control.
+`wiki` is a Frappe app for structured documentation, knowledge bases, and page-level collaboration. The repository contains the web routes, DocTypes, rendering pipeline, sidebar management, revision flow, and search indexing logic that power the wiki experience.
 
-## Tech Stack
+Work in this repository should preserve three things:
 
-- **Framework**: Frappe v15
-- **Python**: 3.10+
-- **Frontend**: Frappe UI, Vue.js
-- **Markdown**: Python-Markdown with extensions
-- **Database**: MariaDB 10.6+
+1. Page readability and route stability.
+2. Sidebar integrity and cached navigation output.
+3. Permission checks for non-public content.
 
-## Repository Structure
+## Repository Map
 
+Top-level files and folders that matter most:
+
+- `wiki/hooks.py`
+  App metadata, route rules, install hooks, and scheduled/search reindex hooks.
+- `wiki/www/wiki.py`
+  Entry route that redirects `/wiki` to the default wiki space.
+- `wiki/wiki/doctype/wiki_page/wiki_page.py`
+  Core page lifecycle, sanitization, sidebar rendering, revisions, permission gates, and update logic.
+- `wiki/wiki/doctype/wiki_page/search.py`
+  Search implementation with Redisearch support and fallback web search.
+- `wiki/wiki/doctype/wiki_space/wiki_space.py`
+  Space creation, route-prefix handling, and sidebar mutation logic.
+- `wiki/wiki/doctype/wiki_settings/wiki_settings.py`
+  Cache invalidation for settings-driven sidebar changes.
+- `wiki/wiki/doctype/wiki_page_patch/wiki_page_patch.py`
+  Patch approval flow for proposed page changes.
+- `cypress/e2e/wiki.cy.js`
+  End-to-end coverage for page create/edit/delete behavior.
+- `cypress/e2e/wiki_sidebar.cy.js`
+  End-to-end coverage for sidebar group creation and empty-group deletion.
+
+## Data Model
+
+### `Wiki Page`
+
+The main content record.
+
+Observed responsibilities from the code:
+
+- Stores page title, route, content, meta fields, and the `published` / `allow_guest` visibility flags.
+- Inherits `WebsiteGenerator`, so each record can render directly as a website route.
+- Sanitizes HTML before save in `before_save`.
+- Clears sidebar cache when page titles change.
+- Updates the search index on `on_update`.
+- Removes linked revision/patch/sidebar records on `on_trash`.
+
+Important files:
+
+- `wiki/wiki/doctype/wiki_page/wiki_page.py`
+- `wiki/wiki/doctype/wiki_page/wiki_page.json`
+- `wiki/wiki/custom/wiki_page.json`
+
+### `Wiki Space`
+
+A namespace and navigation container for related pages.
+
+Observed behavior:
+
+- Holds child sidebar entries in `wiki_sidebars`.
+- Auto-creates a starter page and starter group if the sidebar is empty during insert.
+- Rewrites child page routes when the space route changes.
+- Rebuilds search index and clears sidebar cache on update.
+
+Important file:
+
+- `wiki/wiki/doctype/wiki_space/wiki_space.py`
+
+### `Wiki Group Item`
+
+Binds wiki pages to sidebar groups and ordering.
+
+This is what the sidebar update code mutates when users rearrange groups/pages.
+
+### `Wiki Page Revision` / `Wiki Page Revision Item`
+
+Revision history for content changes.
+
+Observed behavior:
+
+- A revision is created after insert.
+- Additional revisions are written when content changes through the update flow.
+- Revision data is shown in page context for comparison and history views.
+
+### `Wiki Page Patch`
+
+The approval workflow object for edits and proposed new pages.
+
+Observed statuses in code:
+
+- `Draft`
+- `Under Review`
+- `Approved`
+
+Important note:
+
+The task brief mentions `Draft -> Published -> Archived`, but the code inspected in this repository does **not** show an `Archived` workflow state. Agents should not invent one. The current code path is patch-oriented: edits become `Draft` or `Under Review`, then approved patches are submitted and applied, while published visibility is controlled by fields on `Wiki Page`.
+
+## Page Lifecycle
+
+The lifecycle in the current codebase is:
+
+1. A `Wiki Page` record exists and may be published.
+2. User edits are submitted through `update(...)` in `wiki_page.py`.
+3. The edit becomes a `Wiki Page Patch` with status `Draft` or `Under Review`.
+4. If the user has submit permission and the edit is not a draft, the patch is auto-approved and submitted.
+5. Revision history is preserved through `Wiki Page Revision`.
+
+Do not describe this repo as having a full archived-state workflow unless the code is added first.
+
+## Sidebar Structure
+
+Sidebar rendering is not static HTML checked into the repo. It is assembled dynamically:
+
+1. `Wiki Space.wiki_sidebars` identifies page/group membership.
+2. `WikiPage.get_sidebar_items()` constructs the sidebar data structure.
+3. `WikiPage.get_items()` renders the sidebar template.
+4. Rendered sidebar HTML is cached under the `wiki_sidebar` cache hash.
+
+Cache invalidation happens from multiple paths:
+
+- page title changes
+- page deletion
+- wiki space updates
+- wiki settings sidebar visibility changes
+- sidebar reorder operations
+
+Any change to grouping or page labels should clear the relevant cache entries, otherwise the website can show stale navigation.
+
+## Search Indexing
+
+Search behavior is split into two modes:
+
+### Fallback mode
+
+If `Wiki Settings.use_redisearch_for_search` is disabled, search uses Frappe web search.
+
+### Redisearch mode
+
+If enabled, search uses Redisearch indexes per wiki space route.
+
+Observed triggers for rebuilding/updating:
+
+- `WikiPage.on_update()` calls `update_index(self)`
+- `WikiPage.on_trash()` calls `remove_index(self)`
+- `WikiSpace.on_update()` calls `rebuild_index_in_background()`
+- `hooks.py` sets `after_migrate = ["wiki.wiki.doctype.wiki_page.search.rebuild_index_in_background"]`
+- `hooks.py` also schedules the same rebuild hourly
+
+Any change that affects route membership, title, or content must preserve the index update path.
+
+## Security Rules
+
+Non-negotiable rule:
+
+**Never expose private pages without a permission check.**
+
+Grounded examples from the current code:
+
+- `WikiPage.verify_permission()` checks `allow_guest` for read access and redirects unauthorized users to login.
+- `sanitize_html()` strips unsafe HTML and only permits limited iframe usage for YouTube embeds.
+- Search endpoints are guest-accessible, so page visibility assumptions must stay aligned with indexing and route checks.
+
+If you modify rendering, patch application, sidebar APIs, or search, re-check permission boundaries.
+
+## Customizations vs Upstream
+
+What is clearly fork-specific in this repository from local inspection:
+
+- Branch workflow assumes `staging`, `test-production`, and `version-15`.
+- Repo-level automation includes `.github/workflows/agent-trigger.yml` and `.github/workflows/agent-trigger-beta.yml`.
+- CI alignment work in sprint branches adds repo-specific PR gating and typing/linting patterns.
+
+What is **not** safe to assume:
+
+- That every file under `wiki/` diverges from `frappe/wiki`.
+- That an upstream branch named `version-15` exists in `frappe/wiki` today.
+
+When syncing from upstream or applying automated refactors:
+
+- Preserve repo-specific workflow files under `.github/workflows/`.
+- Preserve branch protection assumptions around `staging`, `test-production`, and `version-15`.
+- Diff before overwriting root docs (`README.md`, `AGENTS.md`) or CI files.
+
+## Cypress Test Patterns
+
+Current tests are browser-first and interaction-driven.
+
+Patterns already in use:
+
+- `cy.login()` in `beforeEach()`
+- `cy.visit("/wiki")` to enter the public route
+- `.wiki-options .dropdown-toggle` to open author actions
+- `.edit-wiki-btn` to enter edit mode
+- `.wiki-editor .ProseMirror` for rich-text editing
+- request waits using `cy.intercept(...)` for page route/network stabilization
+
+Current coverage areas:
+
+- create page
+- edit page
+- delete page
+- create sidebar group
+- delete empty sidebar group
+
+When adding E2E coverage:
+
+- Prefer extending these flows rather than inventing a parallel harness.
+- Wait on meaningful route or network events before asserting DOM state.
+- Keep selectors aligned with the existing sidebar/editor structure.
+
+Typical local command shape, depending on the team setup:
+
+```bash
+bench start
+# in another shell
+npx cypress open
 ```
-wiki/
-├── wiki/
-│   ├── doctype/
-│   │   ├── wiki_page/           # Wiki page content
-│   │   ├── wiki_space/          # Wiki namespaces
-│   │   ├── wiki_sidebar/        # Sidebar configuration
-│   │   └── wiki_page_patch/     # Page revisions
-│   ├── www/
-│   │   └── wiki/                # Public wiki routes
-│   ├── markdown_extensions.py   # Custom markdown processors
-│   ├── search.py                # Wiki search functionality
-│   └── hooks.py                 # Frappe hooks
-└── README.md
+
+or:
+
+```bash
+npx cypress run
 ```
 
-## Key Components
+## Deployment / Branch Flow
 
-### DocTypes
+Observed repo workflow expectations:
 
-#### Wiki Page
-- **Purpose**: Stores wiki page content
-- **Fields**: route, title, content (markdown), published
-- **Features**: Versioning, draft mode, approvals
+- feature/task branches open PRs into one of `staging`, `test-production`, or `version-15`
+- `staging` is the normal integration branch
+- `test-production` is used as a pre-production validation branch
+- `version-15` is treated as a protected long-lived branch
 
-#### Wiki Space
-- **Purpose**: Organizes pages into namespaces
-- **Fields**: space_name, route, sidebar
-- **Use Case**: Separate documentation sections
+Agents should not push directly to those protected branches. Use task branches and PRs unless the human explicitly instructs otherwise.
 
-#### Wiki Sidebar
-- **Purpose**: Configures page navigation
-- **Fields**: items (JSON), title
-- **Features**: Nested structure, dynamic items
+## Safe Editing Guidance
 
-### Markdown Processing
+When changing code here:
 
-Custom extensions in `markdown_extensions.py`:
-- Wiki links: `[[Page Name]]`
-- Code blocks with syntax highlighting
-- Table of contents generation
-- Custom CSS classes
+- Preserve route stability where possible; wiki URLs are user-facing.
+- Preserve cache invalidation around sidebar/search changes.
+- Preserve patch/revision history behavior.
+- Preserve `allow_guest` semantics and login redirects.
+- Keep Frappe website rendering conventions intact.
 
-### Search
+When changing docs here:
 
-Wiki-specific search in `search.py`:
-- Full-text search across pages
-- Route-based filtering
-- Permission-aware results
+- Do not invent unsupported lifecycle states or background jobs.
+- Prefer “observed in current code” wording for behaviors that come from source inspection.
 
-## Architecture Patterns
+## Files To Treat Carefully During Updates
 
-### Page Rendering Flow
-1. Parse route from URL
-2. Load Wiki Page document
-3. Convert markdown to HTML
-4. Apply wiki link resolution
-5. Render with sidebar
+These files are especially likely to encode repo-specific behavior and should be diffed carefully before overwriting:
 
-### Wiki Link Resolution
-```python
-def resolve_wiki_link(match):
-    page_name = match.group(1)
-    page = frappe.get_doc("Wiki Page", {"title": page_name})
-    return f'<a href="/{page.route}">{page_name}</a>'
-```
+- `.github/workflows/agent-trigger.yml`
+- `.github/workflows/agent-trigger-beta.yml`
+- `README.md`
+- `AGENTS.md`
+- any repo-specific PR workflows introduced for `staging`, `test-production`, or `version-15`
 
-### Permission Model
-- Public pages: Visible to all
-- Private pages: Role-based access
-- Draft pages: Only editors
+## Quick Start For Future Agents
 
-## Testing Guidelines
+If you need to debug a wiki behavior fast:
 
-- Use `frappe.tests.utils.FrappeTestCase`
-- Test markdown rendering
-- Verify wiki link resolution
-- Check permission filtering
-- Target 30-50% coverage
+1. Start with `wiki/wiki/doctype/wiki_page/wiki_page.py`.
+2. Check whether the issue is content, sidebar, patch approval, or route rendering.
+3. If search is involved, inspect `wiki/wiki/doctype/wiki_page/search.py`.
+4. If navigation is stale, inspect sidebar cache invalidation.
+5. If the issue is editor/UI flow, inspect Cypress tests and public JS assets.
 
-## CI/CD
-
-- `test-on-pr.yml` - Test execution with coverage
-- `linters.yml` - Code quality checks
-- Coverage threshold: 30%
-
-## Dependencies
-
-Key dependencies:
-- Frappe Framework
-- Python-Markdown
-- Pygments (syntax highlighting)
-
-## Security Notes
-
-- Sanitize markdown input
-- Validate page routes
-- Check permissions on every render
-- Prevent XSS in custom HTML
-
-## Common Tasks
-
-### Adding a New Markdown Extension
-1. Create processor class
-2. Register in `markdown_extensions.py`
-3. Add tests
-4. Update documentation
-
-### Creating Wiki Spaces
-1. Define route structure
-2. Configure sidebar
-3. Set permissions
-4. Add landing page
+That path will usually get you to the right subsystem without guesswork.
