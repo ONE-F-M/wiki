@@ -1,8 +1,8 @@
 [tool.black]
-line-length = 110
+line-length = 99
 
 [tool.isort]
-line_length = 110
+line_length = 99
 multi_line_output = 3
 include_trailing_comma = true
 force_grid_wrap = 0
@@ -11,41 +11,11 @@ ensure_newline_before_comments = true
 indent = "\t"
 profile = "black"
 
-[tool.ruff]
-line-length = 110
-target-version = "py310"
+[tool.bench.dev-dependencies]
+pytest-cov = "~=5.0.0"
 
-[tool.ruff.lint]
-select = [
-    "F",
-    "E",
-    "W",
-    "I",
-    "UP",
-    "B",
-    "RUF",
-]
-ignore = [
-    "B017",
-    "B018",
-    "B023",
-    "B904",
-    "E101",
-    "E402",
-    "E501",
-    "E741",
-    "F401",
-    "F403",
-    "F405",
-    "F722",
-    "W191",
-]
-typing-modules = ["frappe.types.DF"]
-
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "tab"
-docstring-code-format = true
+[tool.pytest.ini_options]
+addopts = "--cov=wiki --cov-report=term-missing --cov-fail-under=30"
 
 [tool.coverage.run]
 source = ["wiki"]
