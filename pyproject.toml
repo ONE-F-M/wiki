@@ -11,8 +11,27 @@ ensure_newline_before_comments = true
 indent = "\t"
 profile = "black"
 
-[tool.bench.dev-dependencies]
-pytest-cov = "~=5.0.0"
+[project]
+name = "wiki"
+authors = [
+    { name = "Frappe", email = "developers@frappe.io" }
+]
+description = "Simple Wiki App"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    "ghdiff",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest-cov~=5.0.0",
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
 
 [tool.pytest.ini_options]
 addopts = "--cov=wiki --cov-report=term-missing --cov-fail-under=30"
