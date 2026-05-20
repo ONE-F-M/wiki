@@ -1,0 +1,78 @@
+name: Type Check
+
+on:
+  pull_request:
+    branches: [staging, test-production, version-15]
+    paths:
+      - "wiki/**/*.py"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: typecheck-wiki-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Type Check with basedmypy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install checker
+        run: |
+          pip install basedmypy~=2.0.0
+
+      - name: Resolve typed files from pyproject.toml
+        id: typed_files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import tomllib
+
+          with open("pyproject.toml", "rb") as f:
+              data = tomllib.load(f)
+
+          files = data.get("tool", {}).get("mypy", {}).get("files", [])
+          changed = set()
+          base_sha = os.environ.get("BASE_SHA")
+          head_sha = os.environ.get("HEAD_SHA")
+
+          if base_sha and head_sha:
+              output = subprocess.check_output(
+                  ["git", "diff", "--name-only", base_sha, head_sha],
+                  text=True,
+              )
+              changed = {line.strip() for line in output.splitlines() if line.strip()}
+
+          selected = [path for path in files if path in changed]
+
+          github_output = os.environ["GITHUB_OUTPUT"]
+          with open(github_output, "a", encoding="utf-8") as out:
+              out.write(f"files={' '.join(files)}\n")
+              out.write(f"selected={' '.join(selected)}\n")
+              out.write(f"run_mypy={'true' if bool(selected) else 'false'}\n")
+          PY
+
+      - name: Skip when no typed files changed
+        if: steps.typed_files.outputs.run_mypy != 'true'
+        run: echo "No typed files from [tool.mypy].files changed in this PR."
+
+      - name: Run basedmypy on changed typed files
+        if: steps.typed_files.outputs.run_mypy == 'true'
+        run: |
+          mypy ${{ steps.typed_files.outputs.selected }} --ignore-missing-imports
